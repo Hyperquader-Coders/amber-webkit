@@ -1,0 +1,5 @@
+# The repositories this one needs beside it, as <ROOT_VARIABLE>,<GitHub https URL>. `make setup`
+# (or `make init-siblings`) clones the missing ones into their root. Every one is public, as this
+# repository is.
+# amber-gtk4: its staged build (build/gtk/stage) holds the GTK 4.16 headers WebKit compiles against.
+AMBER_ROOT,https://github.com/Hyperquader-Coders/amber-gtk4

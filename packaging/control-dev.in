@@ -1,0 +1,18 @@
+Package: amber-webkit-dev
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Andre Bremer <hyperquader@gmail.com>
+Installed-Size: @SIZE@
+Depends: amber-webkit (= @VERSION@), amber-gtk4-dev (>= @GTK_MIN@), libsoup-3.0-dev, libglib2.0-dev
+Section: libdevel
+Priority: optional
+Homepage: https://github.com/Hyperquader-Coders/amber-webkit
+Description: WebKitGTK development files for the amber suite's bundle
+ The headers, pkg-config files and unversioned library links of the
+ amber-webkit bundle, all under /usr/lib/amber-webkit, so they never
+ meet the distro's libwebkitgtk-6.0-dev. The suite's Odin binding is
+ generated from these headers.
+ .
+ Build with PKG_CONFIG_PATH set to
+ /usr/lib/amber-webkit/pkgconfig:/usr/lib/amber-gtk4/pkgconfig, and give the
+ program the RUNPATH /usr/lib/amber-webkit:/usr/lib/amber-gtk4.

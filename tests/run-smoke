@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# The smoke test against the staged bundle, before any package is installed.
+#
+# WebKit starts its helper processes from the directory compiled into the library
+# (/usr/lib/amber-webkit/webkitgtk-6.0), so LD_LIBRARY_PATH cannot stand the stage in for the
+# installed package: the library would load and the web process would not start. Instead each
+# run is in a private mount namespace (unshare, as an unprivileged user) where /usr/lib is an
+# overlay with the stage's usr/lib on top. There, and only there, /usr/lib/amber-webkit is the
+# staged bundle, at the path the package installs to; the rest of the system is unchanged,
+# amber-gtk4 included. WebKit's own sandbox (bwrap) runs inside it as it would on a desk.
+#
+# Two programs are built from tests/smoke.c and run off screen under xvfb-run:
+#   smoke-bundle  against the bundle's own headers and .pc files (what amber-webkit-dev ships)
+#   smoke-system  against Mint's libwebkitgtk-6.0-dev 2.52 headers, proving an app built on
+#                 those runs on the bundle
+# Both link with RUNPATH /usr/lib/amber-webkit:/usr/lib/amber-gtk4, as the apps do.
+#
+#   tests/run-smoke <stage> <gtk-pc-dir>
+set -euo pipefail
+
+STAGE=$(realpath "${1:?usage: run-smoke <stage> <gtk-pc-dir>}")
+GTK_PC=$(realpath "${2:?usage: run-smoke <stage> <gtk-pc-dir>}")
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+OUT=$REPO/build/test
+RUNPATH=/usr/lib/amber-webkit:/usr/lib/amber-gtk4
+CC=${CC:-gcc-14}
+
+for tool in xvfb-run unshare "$CC" pkg-config; do
+	command -v "$tool" >/dev/null || {
+		echo "run-smoke: $tool is not installed (make init-packages)" >&2
+		exit 2
+	}
+done
+
+rm -rf "$OUT"
+mkdir -p "$OUT/pc" "$OUT/home"
+# The runtime directory holds the sandbox's D-Bus proxy sockets, whose paths must fit in a
+# socket address (108 bytes), so it is a short one in /tmp rather than under the checkout.
+RUNTIME=$(mktemp -d "${TMPDIR:-/tmp}/amber-webkit-smoke.XXXXXX")
+trap 'rm -rf "$RUNTIME"' EXIT
+
+# The bundle's .pc files name prefix=/usr, where the -dev package installs them; here the
+# prefix moves to the stage.
+for f in "$STAGE"/usr/lib/amber-webkit/pkgconfig/*.pc; do
+	sed "s|^prefix=/usr\$|prefix=$STAGE/usr|" "$f" >"$OUT/pc/${f##*/}"
+done
+
+title="amber-webkit smoke"
+cat >"$OUT/page.html" <<EOF
+<!doctype html>
+<html><head><meta charset="utf-8"><title>$title</title></head>
+<body><p id="p">loading</p>
+<script>document.getElementById("p").textContent = "script ran";</script>
+</body></html>
+EOF
+
+link="-Wl,--enable-new-dtags,-rpath,$RUNPATH"
+# shellcheck disable=SC2046 # pkg-config's output is a list of flags
+PKG_CONFIG_PATH=$OUT/pc:$GTK_PC "$CC" -O1 -Wall -Werror -o "$OUT/smoke-bundle" "$REPO/tests/smoke.c" \
+	$(PKG_CONFIG_PATH=$OUT/pc:$GTK_PC pkg-config --cflags --libs webkitgtk-6.0) "$link"
+pkg-config --exists webkitgtk-6.0 || {
+	echo "run-smoke: Mint's libwebkitgtk-6.0-dev is not installed (make init-packages)" >&2
+	exit 2
+}
+# shellcheck disable=SC2046
+"$CC" -O1 -Wall -Werror -o "$OUT/smoke-system" "$REPO/tests/smoke.c" \
+	$(env -u PKG_CONFIG_PATH pkg-config --cflags --libs webkitgtk-6.0) "$link"
+
+# The inner shell runs in the namespace, after xvfb-run has set DISPLAY and XAUTHORITY: it
+# mounts the overlay and starts the program with a clean environment and a throwaway home.
+# shellcheck disable=SC2016 # expanded by the inner shell
+inner='mount -t overlay amber-webkit-stage -o "lowerdir=$1/usr/lib:/usr/lib" /usr/lib || exit 2
+out=$2
+runtime=$3
+shift 3
+exec env -i PATH=/usr/bin:/bin LANG=C.UTF-8 DISPLAY="$DISPLAY" XAUTHORITY="$XAUTHORITY" \
+	HOME="$out/home" XDG_RUNTIME_DIR="$runtime" XDG_CACHE_HOME="$out/home/.cache" \
+	XDG_DATA_HOME="$out/home/.local/share" XDG_CONFIG_HOME="$out/home/.config" \
+	GDK_BACKEND=x11 GSETTINGS_BACKEND=memory NO_AT_BRIDGE=1 GTK_A11Y=none "$@"'
+
+for prog in smoke-bundle smoke-system; do
+	echo "== $prog: $(readelf -d "$OUT/$prog" | sed -n 's/.*(RUNPATH).*\[\(.*\)\]$/RUNPATH \1/p')"
+	xvfb-run -a -s '-screen 0 1280x800x24 -nolisten tcp' \
+		unshare --user --map-root-user --mount \
+		sh -c "$inner" sh "$STAGE" "$OUT" "$RUNTIME" "$OUT/$prog" "file://$OUT/page.html" "$title"
+done
+echo "smoke OK: both programs loaded the page with WebKit from the bundle and GTK from amber-gtk4"

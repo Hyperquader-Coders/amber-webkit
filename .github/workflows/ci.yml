@@ -1,0 +1,38 @@
+# `make ci` is the gate for a push: the shell scripts, the packaging metadata and the
+# agent-file guard. It builds no WebKit: a build takes about 20 minutes of a 24-core desk and
+# more than 20 GB of memory, so the build, its checks, the smoke test and lintian run on a desk
+# before a package is published (docs/DECISIONS.md, 8).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# The job only reads the repository.
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # The desk's layout: each root siblings.txt uses, under the desk's name, in the folder
+    # above the workspace. house-rules is private and not cloned here, so make ci says it
+    # skips the house's two checks.
+    env:
+      AMBER_ROOT: ${{ github.workspace }}/../amber
+    steps:
+      - uses: actions/checkout@v5
+
+      # siblings.txt is the one list; amber-gtk4 is public and needs no token.
+      - name: siblings
+        run: make init-siblings
+
+      # The packages are the Makefile's DEPS list.
+      - name: system packages
+        run: sudo apt-get update && make init-packages APT_FLAGS=-y
+
+      - name: make ci
+        run: make ci

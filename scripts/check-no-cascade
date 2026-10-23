@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Assert the bundled WebKit resolves against the distro's stock stack and amber-gtk4, and
+# nothing else.
+#
+# Passes when every library the bundle needs is the bundle's own, amber-gtk4's GTK, or a file
+# some dpkg package owns. That is the precise statement of "stock": a hand-built glib in
+# /usr/local, or a library under a home directory, is owned by nothing and fails here.
+#
+# The bundle's own directory is put on LD_LIBRARY_PATH, so libjavascriptcoregtk resolves to
+# the staged copy and not to Mint's, as it does through the RUNPATH once installed.
+#
+#   scripts/check-no-cascade build/webkit/stage/usr/lib/amber-webkit/libwebkitgtk-6.0.so.4 /usr/lib/amber-gtk4
+set -uo pipefail
+
+LIB=${1:?usage: check-no-cascade <path-to-libwebkitgtk-6.0.so.4> <amber-gtk4-dir>}
+GTK_DIR=${2:?usage: check-no-cascade <path-to-libwebkitgtk-6.0.so.4> <amber-gtk4-dir>}
+[ -e "$LIB" ] || {
+	echo "check-no-cascade: no such file: $LIB" >&2
+	exit 1
+}
+
+BUNDLE_DIR=$(cd "$(dirname "$(readlink -f "$LIB")")" && pwd)
+
+fail=0
+note() { printf '  %s\n' "$1"; }
+
+out=$(LD_LIBRARY_PATH=$BUNDLE_DIR ldd "$LIB" 2>/dev/null) || {
+	echo "check-no-cascade: ldd failed on $LIB" >&2
+	exit 1
+}
+
+# 1. Nothing unresolved. A "not found" here is a bundle that will not start.
+if missing=$(grep "not found" <<<"$out"); then
+	echo "UNRESOLVED: the bundle is missing libraries:"
+	note "$missing"
+	fail=1
+fi
+
+# 2. Every resolved dependency is the bundle's, amber-gtk4's, or a distro file.
+unowned=""
+foreign=""
+while read -r _ _ path _; do
+	case "$path" in
+	"" | "("*) continue ;; # vdso and the loader line
+	esac
+	[ -e "$path" ] || continue
+	real=$(readlink -f "$path")
+	case "$(dirname "$real")" in
+	"$BUNDLE_DIR" | "$GTK_DIR") continue ;;
+	esac
+	if ! dpkg -S "$real" >/dev/null 2>&1 && ! dpkg -S "$path" >/dev/null 2>&1; then
+		unowned="$unowned$path -> $real"$'\n'
+		continue
+	fi
+	case "$real" in
+	/usr/local/* | /opt/* | "$HOME"/*) foreign="$foreign$path -> $real"$'\n' ;;
+	esac
+done <<<"$out"
+
+if [ -n "$unowned" ]; then
+	echo "CASCADE: these are not distro packages:"
+	note "${unowned%$'\n'}"
+	echo "  The bundle may depend only on the stock stack and amber-gtk4."
+	fail=1
+fi
+if [ -n "$foreign" ]; then
+	echo "CASCADE: these resolve outside the distro's prefixes:"
+	note "${foreign%$'\n'}"
+	fail=1
+fi
+
+# 3. GTK comes from amber-gtk4, and the bundle's own JavaScriptCore from the bundle.
+want() {
+	local soname=$1 dir=$2 why=$3 line path
+	line=$(grep -F "$soname =>" <<<"$out" | head -1)
+	path=$(awk '{print $3}' <<<"$line")
+	if [ -z "$line" ]; then
+		echo "MISSING: the bundle does not link $soname at all; has the build changed?"
+		fail=1
+	elif [ "$(dirname "$(readlink -f "$path")")" != "$dir" ]; then
+		echo "WRONG $soname: resolves to $path, not under $dir ($why)"
+		fail=1
+	fi
+}
+want libgtk-4.so.1 "$GTK_DIR" "install amber-gtk4"
+want libjavascriptcoregtk-6.0.so.1 "$BUNDLE_DIR" "the bundle's own"
+
+# 4. The stack the version cascade would move first, named so a failure says which one.
+for soname in libglib-2.0.so.0 libsoup-3.0.so.0 libicuuc.so.74 libcairo.so.2; do
+	line=$(grep -F "$soname =>" <<<"$out" | head -1)
+	if [ -z "$line" ]; then
+		echo "MISSING: the bundle does not link $soname; has the build or the distro changed?"
+		fail=1
+	fi
+done
+
+if [ "$fail" -ne 0 ]; then
+	exit 1
+fi
+
+n=$(grep -c "=>" <<<"$out")
+echo "no-cascade OK: $n dependencies, GTK from $GTK_DIR, the rest from distro packages"

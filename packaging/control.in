@@ -1,0 +1,22 @@
+Package: amber-webkit
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Andre Bremer <hyperquader@gmail.com>
+Installed-Size: @SIZE@
+Depends: @DEPS@, amber-gtk4 (>= @GTK_MIN@), libegl1, bubblewrap, xdg-dbus-proxy
+Section: libs
+Priority: optional
+Homepage: https://github.com/Hyperquader-Coders/amber-webkit
+Description: WebKitGTK runtime bundle for the amber suite
+ One WebKitGTK build (the GTK 4 API, webkitgtk-6.0) shared by the amber
+ applications, built against the amber-gtk4 bundle and installed to
+ /usr/lib/amber-webkit. Applications reach it only through their RUNPATH.
+ It is deliberately not on the ldconfig path, so installing it cannot
+ change what anything else on the system links against.
+ .
+ It holds the two libraries, the web, network and GPU helper processes,
+ the injected bundle and the translations. Media playback, WebAudio,
+ WebRTC, gamepads and speech synthesis are not built.
+ .
+ The sonames are those of the distro's libwebkitgtk-6.0-4, so an
+ application built against either set of headers runs on it.
