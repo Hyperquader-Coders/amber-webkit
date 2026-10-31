@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Assert the bundle keeps to its own paths, so a system WebKit installed beside it is never
+# mixed in:
+#   1. every ELF that needs the bundle's libraries or GTK has exactly the bundle's RUNPATH
+#      (a RUNPATH, not an RPATH, so LD_LIBRARY_PATH can still stand the stage in for a test)
+#   2. the two libraries carry Mint's sonames, so an app built on either set of headers loads
+#      the bundle
+#   3. the helper processes and the injected bundle are where the library looks for them, and
+#      the library looks inside the bundle: the helper, injected-bundle and locale directories
+#      compiled into it are the bundle's, and Mint's are not among its strings
+#   4. it was compiled against GTK 4.16: it imports gdk_memory_texture_builder_new, which the
+#      accelerated backing store uses only when GTK_CHECK_VERSION(4, 16, 0) held at build time
+#
+#   scripts/check-bundle-paths <bundle-dir> <runpath> <webkit-soname> <jsc-soname>
+set -uo pipefail
+
+BUNDLE=${1:?usage: check-bundle-paths <bundle-dir> <runpath> <webkit-soname> <jsc-soname>}
+RUNPATH=${2:?}
+WEBKIT_SONAME=${3:?}
+JSC_SONAME=${4:?}
+INSTALL_DIR=${RUNPATH%%:*}
+LOCALE_DIR=/usr/share/amber-webkit/locale
+[ -d "$BUNDLE" ] || {
+	echo "check-bundle-paths: no such directory: $BUNDLE" >&2
+	exit 1
+}
+
+fail=0
+bad() {
+	echo "$1"
+	fail=1
+}
+is_elf() { [ "$(head -c4 "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "7f454c46" ]; }
+
+# 1. RUNPATH
+elves=0
+while IFS= read -r f; do
+	is_elf "$f" || continue
+	elves=$((elves + 1))
+	dyn=$(readelf -d "$f" 2>/dev/null)
+	rel=${f#"$BUNDLE"/}
+	if grep -q '(RPATH)' <<<"$dyn"; then
+		bad "RPATH: $rel has a DT_RPATH; the bundle uses DT_RUNPATH only"
+	fi
+	needs=$(grep -oE 'Shared library: \[(libwebkitgtk-6\.0|libjavascriptcoregtk-6\.0|libgtk-4)\.so[^]]*\]' <<<"$dyn")
+	[ -n "$needs" ] || continue
+	have=$(sed -n 's/.*(RUNPATH).*\[\(.*\)\]$/\1/p' <<<"$dyn")
+	[ "$have" = "$RUNPATH" ] || bad "RUNPATH: $rel has '${have:-none}', not '$RUNPATH'"
+done < <(find "$BUNDLE" -type f | sort)
+[ "$elves" -gt 0 ] || bad "no ELF objects under $BUNDLE"
+
+# 2. sonames
+for soname in "$WEBKIT_SONAME" "$JSC_SONAME"; do
+	if [ ! -e "$BUNDLE/$soname" ]; then
+		bad "SONAME: $soname is not in the bundle"
+		continue
+	fi
+	have=$(readelf -d "$BUNDLE/$soname" | sed -n 's/.*(SONAME).*\[\(.*\)\]$/\1/p')
+	[ "$have" = "$soname" ] || bad "SONAME: $soname carries '$have'"
+done
+
+# 3. helpers, injected bundle, compiled-in directories
+pkg=$INSTALL_DIR/webkitgtk-6.0
+for helper in WebKitWebProcess WebKitNetworkProcess WebKitGPUProcess; do
+	[ -x "$BUNDLE/webkitgtk-6.0/$helper" ] || bad "HELPER: webkitgtk-6.0/$helper is missing"
+done
+[ -e "$BUNDLE/webkitgtk-6.0/injected-bundle/libwebkitgtkinjectedbundle.so" ] ||
+	bad "HELPER: webkitgtk-6.0/injected-bundle/libwebkitgtkinjectedbundle.so is missing"
+lib_strings=$(strings -a "$BUNDLE/$WEBKIT_SONAME")
+for want in "$pkg" "$LOCALE_DIR"; do
+	grep -qxF "$want" <<<"$lib_strings" || bad "PATH: $WEBKIT_SONAME does not name $want"
+done
+if grep -E '^/usr/(lib|libexec)/(x86_64-linux-gnu/)?webkitgtk-6\.0|^/usr/share/locale$' <<<"$lib_strings"; then
+	bad "PATH: $WEBKIT_SONAME names a system WebKit or locale directory (above)"
+fi
+
+# 4. built against GTK 4.16
+imports=$(nm -D --undefined-only "$BUNDLE/$WEBKIT_SONAME")
+grep -qw gdk_memory_texture_builder_new <<<"$imports" ||
+	bad "GTK: $WEBKIT_SONAME does not import gdk_memory_texture_builder_new: built against GTK < 4.16?"
+
+[ "$fail" -eq 0 ] || exit 1
+echo "bundle-paths OK: $elves objects, RUNPATH $RUNPATH, sonames $WEBKIT_SONAME and $JSC_SONAME, helpers in $pkg, built against GTK 4.16"

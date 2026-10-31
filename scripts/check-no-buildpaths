@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Assert the shipped files carry no path from the machine that built them.
+#
+# WebKit compiles its install directories in as string constants that `strip` does not
+# touch, and __FILE__ names the source tree, so a build-tree prefix or an unmapped source
+# path ships the builder's home directory in the .deb. The Makefile configures with /usr,
+# stages through DESTDIR and maps the source and build directories out with
+# -ffile-prefix-map; this checks the result.
+#
+# Fails on the builder's home, the repository, and staging or build directories, in the objects
+# and in the text files shipped beside them; in the text files also on a system path under a
+# scratch or staging root. Any other /home, /root or /tmp path in an object is upstream's own
+# and is reported, not failed on.
+#
+#   scripts/check-no-buildpaths build/webkit/stage/usr/lib/amber-webkit
+#   scripts/check-no-buildpaths build/deb/amber-webkit
+set -uo pipefail
+
+TARGET=${1:?usage: check-no-buildpaths <dir-or-file>}
+[ -e "$TARGET" ] || {
+	echo "check-no-buildpaths: no such path: $TARGET" >&2
+	exit 1
+}
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+
+is_elf() { [ "$(head -c4 "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "7f454c46" ]; }
+
+# A path is this build's if it sits under the builder's home or the repository (literal
+# prefixes), or has the shape of this build's directories.
+STAGE_SHAPES='/build/webkit/(src|_build|stage)(/|$)'
+
+fail=0
+checked=0
+upstream=""
+
+while IFS= read -r f; do
+	is_elf "$f" || continue
+	checked=$((checked + 1))
+
+	paths=$(strings -a "$f" |
+		grep -aoE '(/home/[A-Za-z0-9_.-]+|/root|/tmp)/[A-Za-z0-9_./+-]*' |
+		sort -u)
+	[ -n "$paths" ] || continue
+
+	bad=$({
+		grep -F -e "$HOME/" -e "$REPO/" <<<"$paths"
+		grep -E "$STAGE_SHAPES" <<<"$paths"
+	} |
+		sort -u)
+	if [ -n "$bad" ]; then
+		echo "BUILD PATH: ${f#"$REPO"/} carries paths from this build tree:"
+		head -5 <<<"$bad" | sed 's/^/    /'
+		fail=1
+	fi
+
+	rest=$(grep -vxF "$bad" <<<"$paths" || true)
+	[ -n "$rest" ] && upstream="$upstream$rest"$'\n'
+done < <(find "$TARGET" -type f 2>/dev/null)
+
+# The text the packages ship (the headers, the .pc files, the copyright) carries no path
+# from this build either, and no system path under a scratch or staging root: a library the
+# build found in a stage or in a -dev package unpacked without root is named where its package
+# installs it.
+SYSROOT_SHAPE='(/home/[A-Za-z0-9_.-]+|/root|/tmp)/[^ ;"]*/usr/(lib|include)/'
+texts=0
+while IFS= read -r f; do
+	is_elf "$f" && continue
+	grep -Iq . "$f" 2>/dev/null || continue
+	texts=$((texts + 1))
+	bad=$({
+		grep -noF -e "$HOME/" -e "$REPO/" "$f"
+		grep -noE "$STAGE_SHAPES|$SYSROOT_SHAPE" "$f"
+	} | sort -u)
+	if [ -n "$bad" ]; then
+		echo "BUILD PATH: ${f#"$REPO"/} names paths from this build or a scratch root:"
+		head -5 <<<"$bad" | sed 's/^/    /'
+		fail=1
+	fi
+done < <(find "$TARGET" -type f 2>/dev/null)
+
+if [ "$checked" -eq 0 ]; then
+	echo "check-no-buildpaths: no ELF objects under $TARGET: nothing was checked" >&2
+	exit 1
+fi
+
+if [ "$fail" -ne 0 ]; then
+	echo "  The bundle must be configured with --prefix=/usr, built with the Makefile's"
+	echo "  -ffile-prefix-map flags and installed through DESTDIR (the Makefile's webkit target)."
+	exit 1
+fi
+
+n=$(sort -u <<<"${upstream%$'\n'}" | grep -c . || true)
+echo "no-buildpaths OK: $checked objects and $texts text files, none from this build ($n upstream path(s) left in place)"
