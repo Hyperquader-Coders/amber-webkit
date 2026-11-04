@@ -1,0 +1,6 @@
+# GTK is amber-gtk4's, which the RUNPATH reaches first, so dpkg-shlibdeps names it and never the
+# distro's libgtk-4-1. The two libraries are the bundle's own, so they add no dependency, even
+# where the distro's libwebkitgtk-6.0-4 is installed beside it.
+libgtk-4 1 amber-gtk4 (>= 4.16.13)
+libwebkitgtk-6.0 4
+libjavascriptcoregtk-6.0 1

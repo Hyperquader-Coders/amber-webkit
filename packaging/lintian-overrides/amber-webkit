@@ -1,0 +1,11 @@
+# Every object's RUNPATH names the bundle's own directory and then the amber-gtk4 bundle on
+# purpose: the libraries are not on the ldconfig path, and they must load amber-gtk4's GTK,
+# never the distro's older one.
+amber-webkit: custom-library-search-path RUNPATH /usr/lib/amber-gtk4 *
+
+# Misspellings in upstream WebKit's own messages, compiled into its libraries; they are
+# reported upstream's way, not patched here.
+amber-webkit: spelling-error-in-binary *
+
+# Not a Debian upload; there is no bug tracker entry to close.
+amber-webkit: initial-upload-closes-no-bugs

@@ -1,0 +1,97 @@
+Source: amber-webkit
+Section: libs
+Priority: optional
+Maintainer: Andre Bremer <hyperquader@gmail.com>
+Build-Depends: binutils,
+               bubblewrap,
+               cmake,
+               curl,
+               dpkg-dev,
+               g++-14,
+               gcc-14,
+               gperf,
+               gpg,
+               gpgv,
+               libatspi2.0-dev,
+               libavif-dev,
+               libcairo2-dev,
+               libdrm-dev,
+               libegl-dev,
+               libenchant-2-dev,
+               libepoxy-dev,
+               libexpat1-dev,
+               libfontconfig-dev,
+               libfreetype-dev,
+               libgbm-dev,
+               libgcrypt20-dev,
+               libgdk-pixbuf-2.0-dev,
+               libgl-dev,
+               libgles-dev,
+               libglib2.0-dev,
+               libgraphene-1.0-dev,
+               libharfbuzz-dev,
+               libhyphen-dev,
+               libicu-dev,
+               libjpeg-dev,
+               libjxl-dev,
+               liblcms2-dev,
+               libpango1.0-dev,
+               libpng-dev,
+               libseccomp-dev,
+               libsecret-1-dev,
+               libsoup-3.0-dev,
+               libsqlite3-dev,
+               libsystemd-dev,
+               libtasn1-6-dev,
+               libwayland-dev,
+               libwebp-dev,
+               libx11-dev,
+               libxkbcommon-dev,
+               libxml2-dev,
+               libxslt1-dev,
+               ninja-build,
+               perl,
+               pkgconf,
+               python3,
+               ruby,
+               wayland-protocols,
+               xdg-dbus-proxy,
+               zlib1g-dev,
+               libwebkitgtk-6.0-dev <!nocheck>,
+               lintian <!nocheck>,
+               shellcheck <!nocheck>,
+               shfmt <!nocheck>,
+               xauth <!nocheck>,
+               xvfb <!nocheck>
+Homepage: https://github.com/Hyperquader-Coders/amber-webkit
+
+Package: amber-webkit
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}, amber-gtk4 (>= 4.16.13), libegl1, bubblewrap, xdg-dbus-proxy
+Description: WebKitGTK runtime bundle for the amber suite
+ One WebKitGTK build (the GTK 4 API, webkitgtk-6.0) shared by the amber
+ applications, built against the amber-gtk4 bundle and installed to
+ /usr/lib/amber-webkit. Applications reach it only through their RUNPATH.
+ It is deliberately not on the ldconfig path, so installing it cannot
+ change what anything else on the system links against.
+ .
+ It holds the two libraries, the web, network and GPU helper processes,
+ the injected bundle and the translations. Media playback, WebAudio,
+ WebRTC, gamepads and speech synthesis are not built.
+ .
+ The sonames are those of the distro's libwebkitgtk-6.0-4, so an
+ application built against either set of headers runs on it.
+
+Package: amber-webkit-dev
+Section: libdevel
+Architecture: amd64
+Depends: amber-webkit (= ${binary:Version}), amber-gtk4-dev (>= 4.16.13), libsoup-3.0-dev, libglib2.0-dev
+Description: WebKitGTK development files for the amber suite's bundle
+ The headers, pkg-config files and unversioned library links of the
+ amber-webkit bundle, all under /usr/lib/amber-webkit, so they never
+ meet the distro's libwebkitgtk-6.0-dev. The suite's Odin binding is
+ generated from these headers.
+ .
+ Build with PKG_CONFIG_PATH set to
+ /usr/lib/amber-webkit/pkgconfig:/usr/lib/amber-gtk4/pkgconfig, and give the
+ program the RUNPATH /usr/lib/amber-webkit:/usr/lib/amber-gtk4.

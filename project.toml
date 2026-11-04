@@ -1,0 +1,157 @@
+# What amber-webkit is and needs: build is what the bundle's build needs, test what only its checks
+# need. house-rules docs/PROJECT_TOML.md has the layout.
+[project]
+schema = "amber-project-1"
+name = "amber-webkit"
+kind = "bundle"
+summary = "WebKitGTK runtime bundle for the Amber Linux applications"
+tags = [
+  "ai-assisted",
+  "amber",
+  "amberlinux",
+  "debian-packaging",
+  "gtk4",
+  "linux-mint",
+  "webkitgtk",
+]
+license = "LGPL-2.1-or-later"
+# The kind's steps and the smoke test, which loads a page against the staged bundle.
+steps = [
+  "init-modules",
+  "check-fmt",
+  "check-no-agent-files",
+  "lint",
+  "check",
+  "test",
+  "check-lintian",
+]
+
+[siblings.AMBER_ROOT]
+# Its staged build holds the GTK 4.16 headers WebKit compiles against.
+amber-gtk4 = "https://github.com/Hyperquader-Coders/amber-gtk4"
+
+[build]
+# cmake, ninja, gcc-14, perl, ruby, python3 and gperf build WebKit; the -dev packages are its
+# libraries; bubblewrap and xdg-dbus-proxy are the sandbox, whose paths are compiled in; curl
+# fetches the release and gpg and gpgv check its signature; dpkg-dev is for dpkg-shlibdeps and
+# binutils for the strip.
+packages = [
+  "cmake",
+  "ninja-build",
+  "gcc-14",
+  "g++-14",
+  "perl",
+  "ruby",
+  "python3",
+  "gperf",
+  "pkgconf",
+  "curl",
+  "gpg",
+  "gpgv",
+  "dpkg-dev",
+  "binutils",
+  "libglib2.0-dev",
+  "libcairo2-dev",
+  "libpango1.0-dev",
+  "libgdk-pixbuf-2.0-dev",
+  "libgraphene-1.0-dev",
+  "libgcrypt20-dev",
+  "libsoup-3.0-dev",
+  "libtasn1-6-dev",
+  "libharfbuzz-dev",
+  "libicu-dev",
+  "libjpeg-dev",
+  "libepoxy-dev",
+  "libxml2-dev",
+  "libxslt1-dev",
+  "libpng-dev",
+  "libsqlite3-dev",
+  "zlib1g-dev",
+  "libwebp-dev",
+  "libatspi2.0-dev",
+  "libsecret-1-dev",
+  "libdrm-dev",
+  "libgbm-dev",
+  "libenchant-2-dev",
+  "libhyphen-dev",
+  "libjxl-dev",
+  "libavif-dev",
+  "liblcms2-dev",
+  "libfreetype-dev",
+  "libfontconfig-dev",
+  "libexpat1-dev",
+  "libsystemd-dev",
+  "libseccomp-dev",
+  "libegl-dev",
+  "libgles-dev",
+  "libgl-dev",
+  "libx11-dev",
+  "libwayland-dev",
+  "wayland-protocols",
+  "libxkbcommon-dev",
+  "bubblewrap",
+  "xdg-dbus-proxy",
+]
+
+[test]
+# xvfb and xauth run the smoke test off screen; libwebkitgtk-6.0-dev is the distro's 2.52
+# headers, which the smoke test builds a second program against to prove an app built on them
+# runs on the bundle.
+packages = [
+  "shellcheck",
+  "shfmt",
+  "lintian",
+  "xvfb",
+  "xauth",
+  "libwebkitgtk-6.0-dev",
+]
+
+[bundle]
+version = "2.54.1"
+source = "https://webkitgtk.org/releases/webkitgtk-2.54.1.tar.xz"
+# The sum in the webkitgtk-2.54.1.tar.xz.sums file webkitgtk.org publishes beside the archive.
+sha256 = "ea0bbb02dbdbc596874a4e7ad35b66645b3e0a232bd0e4081de5ed92eb0a397d"
+build-system = "cmake"
+# Without LTO: a WebKit link under gcc LTO takes far more time and memory than a desk has.
+build-flags = [
+  "hardening=+all",
+  "optimize=-lto",
+]
+# docs/DECISIONS.md says why each is set: the GTK port and the GTK 4 API with gcc-14; the helper
+# processes inside the bundle, the translations in /usr/share/amber-webkit/locale; every object's
+# RUNPATH the bundle's, then amber-gtk4's, made a RUNPATH by --enable-new-dtags in the Release
+# linker flags, which come after WebKit's --disable-new-dtags; the sandbox on with the distro's
+# helpers; introspection, docs, MiniBrowser, WebDriver, media, gamepads, sysprof and libbacktrace
+# off; WebKit's own unifdef.
+options = [
+  "PORT=GTK",
+  "USE_GTK4=ON",
+  "CMAKE_C_COMPILER=gcc-14",
+  "CMAKE_CXX_COMPILER=g++-14",
+  "CMAKE_INSTALL_LIBEXECDIR=lib/amber-webkit",
+  "CMAKE_INSTALL_LOCALEDIR=share/amber-webkit/locale",
+  "CMAKE_INSTALL_RPATH=/usr/lib/amber-webkit:/usr/lib/amber-gtk4",
+  "CMAKE_SHARED_LINKER_FLAGS_RELEASE=-Wl,--enable-new-dtags",
+  "CMAKE_EXE_LINKER_FLAGS_RELEASE=-Wl,--enable-new-dtags",
+  "CMAKE_MODULE_LINKER_FLAGS_RELEASE=-Wl,--enable-new-dtags",
+  "ENABLE_BUBBLEWRAP_SANDBOX=ON",
+  "BWRAP_EXECUTABLE=/usr/bin/bwrap",
+  "DBUS_PROXY_EXECUTABLE=/usr/bin/xdg-dbus-proxy",
+  "ENABLE_INTROSPECTION=OFF",
+  "ENABLE_DOCUMENTATION=OFF",
+  "ENABLE_MINIBROWSER=OFF",
+  "ENABLE_WEBDRIVER=OFF",
+  "USE_GSTREAMER=OFF",
+  "ENABLE_VIDEO=OFF",
+  "ENABLE_WEB_AUDIO=OFF",
+  "ENABLE_MEDIA_SOURCE=OFF",
+  "ENABLE_ENCRYPTED_MEDIA=OFF",
+  "ENABLE_MEDIA_STREAM=OFF",
+  "ENABLE_MEDIA_RECORDER=OFF",
+  "ENABLE_WEB_CODECS=OFF",
+  "ENABLE_SPEECH_SYNTHESIS=OFF",
+  "ENABLE_GAMEPAD=OFF",
+  "USE_SYSPROF_CAPTURE=OFF",
+  "USE_LIBBACKTRACE=OFF",
+  "USE_SYSTEM_UNIFDEF=OFF",
+]

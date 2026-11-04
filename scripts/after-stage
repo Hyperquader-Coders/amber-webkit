@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Fix-ups to the staged tree, before it is stripped and checked, so the checks see what the
+# packages ship (docs/DECISIONS.md, 5):
+#   - CMake's gettext macro installs the catalogues to share/locale whatever the locale
+#     directory is; they go to /usr/share/amber-webkit/locale, the directory compiled into the
+#     library, beside none of Mint's
+#   - WebKit's .pc templates write includedir as ${prefix}/include whatever the include
+#     directory is, and libdir as an absolute path; both become the bundle's, relative to the
+#     prefix (scripts/check-pc checks them)
+#   - the jsc shell WebKit installs beside the helpers is a developer's tool, which nothing runs
+#
+#   scripts/after-stage build/stage /usr/lib/amber-webkit
+set -euo pipefail
+
+STAGE=${1:?usage: after-stage <stage> <install-dir>}
+INSTALL_DIR=${2:?usage: after-stage <stage> <install-dir>}
+BUNDLE=$STAGE$INSTALL_DIR
+rel=${INSTALL_DIR#/usr/}
+
+[ -d "$STAGE/usr/share/locale" ] || {
+	echo "after-stage: $STAGE/usr/share/locale is missing" >&2
+	exit 1
+}
+LOCALE=$STAGE/usr/share/${INSTALL_DIR##*/}/locale
+rm -rf "$LOCALE"
+mkdir -p "${LOCALE%/*}"
+mv "$STAGE/usr/share/locale" "$LOCALE"
+
+sed -i -e "s|^libdir=.*|libdir=\${prefix}/$rel|" \
+	-e "s|^includedir=.*|includedir=\${prefix}/$rel/include|" "$BUNDLE"/pkgconfig/*.pc
+
+rm -f "$BUNDLE/webkitgtk-6.0/jsc"
+echo "after-stage: $(find "$LOCALE" -name '*.mo' | wc -l) catalogues in ${LOCALE#"$STAGE"}, .pc files inside the bundle, jsc left out"

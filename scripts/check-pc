@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Assert the -dev package's .pc files point inside the bundle: libdir is the bundle's
+# directory and includedir its include/ folder, so a program that builds against them
+# compiles with the bundle's headers and links the bundle's libraries, never Mint's.
+#
+# pkg-config reads a file's Requires before it answers for a variable: webkitgtk-6.0 requires
+# javascriptcoregtk-6.0, found beside it, and gtk4, which amber-webkit-dev takes from
+# amber-gtk4-dev. The caller names a GTK 4.16 pkg-config directory in PKG_CONFIG_PATH (the
+# Makefile passes amber-gtk4's stage), and the gtk4 found there must be 4.16 or later: the bundle
+# was compiled against 4.16, and Mint's 4.14 would satisfy the bare `gtk4` the files require.
+#
+#   PKG_CONFIG_PATH=<gtk4-pc-dir> scripts/check-pc build/deb/amber-webkit-dev/usr/lib/amber-webkit/pkgconfig /usr/lib/amber-webkit
+set -uo pipefail
+
+DIR=${1:?usage: check-pc <pkgconfig-dir> <install-dir>}
+INSTALL_DIR=${2:?usage: check-pc <pkgconfig-dir> <install-dir>}
+export PKG_CONFIG_PATH=$DIR${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}
+
+fail=0
+n=0
+for pc in javascriptcoregtk-6.0 webkitgtk-6.0 webkitgtk-web-process-extension-6.0; do
+	f=$DIR/$pc.pc
+	if [ ! -e "$f" ]; then
+		echo "PC: $pc.pc is missing"
+		fail=1
+		continue
+	fi
+	n=$((n + 1))
+	for var in libdir includedir; do
+		have=$(pkg-config --define-variable=prefix=/usr --variable="$var" "$f")
+		want=$INSTALL_DIR
+		[ "$var" = includedir ] && want=$INSTALL_DIR/include
+		[ "$have" = "$want" ] || {
+			echo "PC: $pc.pc has $var=$have, not $want"
+			fail=1
+		}
+	done
+done
+
+gtk=$(pkg-config --modversion gtk4 2>/dev/null) || gtk=none
+pkg-config --atleast-version=4.16 gtk4 2>/dev/null || {
+	echo "PC: the gtk4 the .pc files require resolves to GTK $gtk, not 4.16 (PKG_CONFIG_PATH=$PKG_CONFIG_PATH)"
+	fail=1
+}
+
+[ "$fail" -eq 0 ] || exit 1
+echo "pc OK: $n .pc files, libdir $INSTALL_DIR, includedir $INSTALL_DIR/include, gtk4 $gtk"
